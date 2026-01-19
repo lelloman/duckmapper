@@ -67,3 +67,11 @@ data class DomainDetails(
     val description: String,
     val metadata: String
 )
+
+// Sealed interface for connection state mapping
+sealed interface DomainConnectionState {
+    data object Disconnected : DomainConnectionState
+    data object Connecting : DomainConnectionState
+    data class Connected(val deviceId: Int, val serverVersion: String) : DomainConnectionState
+    data class Error(val message: String) : DomainConnectionState
+}

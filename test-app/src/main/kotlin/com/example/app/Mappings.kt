@@ -17,4 +17,6 @@ import com.example.ui.*
 @DuckWrap(DomainItem::class, DomainDisplayable::class)
 // @DuckImplement: source just needs matching properties - generates implementation class
 @DuckImplement(DomainDetails::class, UiDisplayable::class)
+// Sealed interface mapping: Domain (subset) -> Ui (superset with extra Reconnecting state)
+@DuckMap(DomainConnectionState::class, UiConnectionState::class)
 object Mappings

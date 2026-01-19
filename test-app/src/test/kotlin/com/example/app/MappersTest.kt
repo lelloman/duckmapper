@@ -302,4 +302,69 @@ class MappersTest {
         val impl3 = differentDetails.toUiDisplayable()
         assertEquals("Different Title", impl3.title)
     }
+
+    @Test
+    fun `sealed interface mapping - data object Disconnected`() {
+        val domain: DomainConnectionState = DomainConnectionState.Disconnected
+
+        val ui = domain.toUiConnectionState()
+
+        assertEquals(UiConnectionState.Disconnected, ui)
+    }
+
+    @Test
+    fun `sealed interface mapping - data object Connecting`() {
+        val domain: DomainConnectionState = DomainConnectionState.Connecting
+
+        val ui = domain.toUiConnectionState()
+
+        assertEquals(UiConnectionState.Connecting, ui)
+    }
+
+    @Test
+    fun `sealed interface mapping - data class Connected with properties`() {
+        val domain: DomainConnectionState = DomainConnectionState.Connected(
+            deviceId = 42,
+            serverVersion = "1.2.3"
+        )
+
+        val ui = domain.toUiConnectionState()
+
+        assert(ui is UiConnectionState.Connected)
+        val connected = ui as UiConnectionState.Connected
+        assertEquals(42, connected.deviceId)
+        assertEquals("1.2.3", connected.serverVersion)
+    }
+
+    @Test
+    fun `sealed interface mapping - data class Error with properties`() {
+        val domain: DomainConnectionState = DomainConnectionState.Error(
+            message = "Connection timeout"
+        )
+
+        val ui = domain.toUiConnectionState()
+
+        assert(ui is UiConnectionState.Error)
+        val error = ui as UiConnectionState.Error
+        assertEquals("Connection timeout", error.message)
+    }
+
+    @Test
+    fun `sealed interface mapping - exhaustive when expression`() {
+        // Test all variants to ensure exhaustive mapping
+        val states = listOf(
+            DomainConnectionState.Disconnected,
+            DomainConnectionState.Connecting,
+            DomainConnectionState.Connected(1, "v1"),
+            DomainConnectionState.Error("err")
+        )
+
+        val mapped = states.map { it.toUiConnectionState() }
+
+        assertEquals(4, mapped.size)
+        assert(mapped[0] is UiConnectionState.Disconnected)
+        assert(mapped[1] is UiConnectionState.Connecting)
+        assert(mapped[2] is UiConnectionState.Connected)
+        assert(mapped[3] is UiConnectionState.Error)
+    }
 }

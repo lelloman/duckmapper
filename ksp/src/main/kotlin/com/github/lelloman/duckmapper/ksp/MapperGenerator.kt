@@ -103,6 +103,18 @@ class MapperGenerator(
             )
         }
 
+        // Check if both are sealed classes/interfaces
+        val sourceIsSealed = Modifier.SEALED in source.modifiers
+        val targetIsSealed = Modifier.SEALED in target.modifiers
+
+        if (sourceIsSealed && targetIsSealed) {
+            return generateSealedMapper(source, target)
+        } else if (sourceIsSealed || targetIsSealed) {
+            return MapperResult.Error(
+                "Cannot map between sealed and non-sealed: ${source.qualifiedName?.asString()} -> ${target.qualifiedName?.asString()}"
+            )
+        }
+
         return generateDataClassMapper(source, target)
     }
 
@@ -147,6 +159,148 @@ class MapperGenerator(
             .build()
 
         return MapperResult.Success(funSpec)
+    }
+
+    private fun generateSealedMapper(source: KSClassDeclaration, target: KSClassDeclaration): MapperResult {
+        val sourceTypeName = source.toClassName()
+        val targetTypeName = target.toClassName()
+        val functionName = "to${target.simpleName.asString()}"
+
+        // Get sealed subclasses
+        val sourceSubclasses = source.getSealedSubclasses().toList()
+        val targetSubclasses = target.getSealedSubclasses().associateBy { it.simpleName.asString() }
+
+        // Check that all source subclasses have matching target subclasses (subset -> superset OK)
+        // If source has subclasses not in target, skip silently (allows one-way mapping)
+        val missingSubclasses = sourceSubclasses.filter { it.simpleName.asString() !in targetSubclasses }
+        if (missingSubclasses.isNotEmpty()) {
+            return MapperResult.Skipped
+        }
+
+        val whenBlock = CodeBlock.builder().apply {
+            beginControlFlow("when (this)")
+            for (sourceSubclass in sourceSubclasses) {
+                val subclassName = sourceSubclass.simpleName.asString()
+                val targetSubclass = targetSubclasses[subclassName]!!
+                val sourceSubclassType = sourceTypeName.nestedClass(subclassName)
+                val targetSubclassType = targetTypeName.nestedClass(subclassName)
+
+                // Check if it's a data object (no constructor params) or data class (has params)
+                val isDataObject = Modifier.DATA in sourceSubclass.modifiers &&
+                        (sourceSubclass.primaryConstructor?.parameters?.isEmpty() ?: true) &&
+                        sourceSubclass.classKind == ClassKind.OBJECT
+
+                if (isDataObject) {
+                    // data object -> direct reference
+                    addStatement("is %T -> %T", sourceSubclassType, targetSubclassType)
+                } else {
+                    // data class -> map properties via constructor
+                    val constructorCall = buildSealedSubclassConstructorCall(
+                        sourceSubclass,
+                        targetSubclass,
+                        targetSubclassType
+                    )
+                    if (constructorCall is SealedConstructorResult.Error) {
+                        return MapperResult.Error(constructorCall.message)
+                    }
+                    addStatement("is %T -> %L", sourceSubclassType, (constructorCall as SealedConstructorResult.Success).codeBlock)
+                }
+            }
+            endControlFlow()
+        }.build()
+
+        val funSpec = FunSpec.builder(functionName)
+            .receiver(sourceTypeName)
+            .returns(targetTypeName)
+            .addStatement("return %L", whenBlock)
+            .build()
+
+        return MapperResult.Success(funSpec)
+    }
+
+    private sealed class SealedConstructorResult {
+        data class Success(val codeBlock: CodeBlock) : SealedConstructorResult()
+        data class Error(val message: String) : SealedConstructorResult()
+    }
+
+    private fun buildSealedSubclassConstructorCall(
+        sourceSubclass: KSClassDeclaration,
+        targetSubclass: KSClassDeclaration,
+        targetSubclassType: ClassName
+    ): SealedConstructorResult {
+        val targetConstructorParams = targetSubclass.primaryConstructor?.parameters
+            ?: return SealedConstructorResult.Success(CodeBlock.of("%T", targetSubclassType))
+
+        if (targetConstructorParams.isEmpty()) {
+            return SealedConstructorResult.Success(CodeBlock.of("%T", targetSubclassType))
+        }
+
+        val sourceProps = sourceSubclass.getAllProperties().associateBy { it.simpleName.asString() }
+
+        val builder = CodeBlock.builder()
+        builder.add("%T(\n", targetSubclassType)
+
+        targetConstructorParams.forEachIndexed { index, param ->
+            val paramName = param.name?.asString() ?: return SealedConstructorResult.Error(
+                "Parameter without name in ${targetSubclass.qualifiedName?.asString()}"
+            )
+            val sourceProp = sourceProps[paramName]
+                ?: return SealedConstructorResult.Error(
+                    "Missing property '$paramName' in source sealed subclass ${sourceSubclass.qualifiedName?.asString()}"
+                )
+
+            val sourceType = sourceProp.type.resolve()
+            val targetType = param.type.resolve()
+
+            val mappingResult = resolvePropertyMapping(paramName, sourceType, targetType)
+            if (mappingResult is PropertyMappingResult.Error) {
+                return SealedConstructorResult.Error(mappingResult.message)
+            }
+
+            val mapping = (mappingResult as PropertyMappingResult.Success).mapping
+            val comma = if (index < targetConstructorParams.size - 1) "," else ""
+
+            when (mapping.type) {
+                PropertyMappingType.DIRECT -> {
+                    builder.add("  %N = this.%N%L\n", paramName, paramName, comma)
+                }
+                PropertyMappingType.MAPPED -> {
+                    if (mapping.sourceNullable) {
+                        builder.add("  %N = this.%N?.%N()%L\n", paramName, paramName, mapping.mapperName, comma)
+                    } else {
+                        builder.add("  %N = this.%N.%N()%L\n", paramName, paramName, mapping.mapperName, comma)
+                    }
+                }
+                PropertyMappingType.LIST_MAPPED -> {
+                    if (mapping.sourceNullable) {
+                        builder.add("  %N = this.%N?.map { it.%N() }%L\n", paramName, paramName, mapping.mapperName, comma)
+                    } else {
+                        builder.add("  %N = this.%N.map { it.%N() }%L\n", paramName, paramName, mapping.mapperName, comma)
+                    }
+                }
+                PropertyMappingType.ARRAY_MAPPED -> {
+                    if (mapping.sourceNullable) {
+                        builder.add("  %N = this.%N?.map { it.%N() }?.toTypedArray()%L\n", paramName, paramName, mapping.mapperName, comma)
+                    } else {
+                        builder.add("  %N = this.%N.map { it.%N() }.toTypedArray()%L\n", paramName, paramName, mapping.mapperName, comma)
+                    }
+                }
+                PropertyMappingType.MAP_MAPPED -> {
+                    val keyExpr = mapping.keyMapperName?.let { "k.$it()" } ?: "k"
+                    val valueExpr = mapping.mapperName?.let { "v.$it()" } ?: "v"
+                    if (mapping.sourceNullable) {
+                        builder.add("  %N = this.%N?.map { (k, v) -> %L to %L }?.toMap()%L\n",
+                            paramName, paramName, keyExpr, valueExpr, comma)
+                    } else {
+                        builder.add("  %N = this.%N.map { (k, v) -> %L to %L }.toMap()%L\n",
+                            paramName, paramName, keyExpr, valueExpr, comma)
+                    }
+                }
+            }
+        }
+
+        builder.add(")")
+        return SealedConstructorResult.Success(builder.build())
     }
 
     private fun generateDataClassMapper(source: KSClassDeclaration, target: KSClassDeclaration): MapperResult {

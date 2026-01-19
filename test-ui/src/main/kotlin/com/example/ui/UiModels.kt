@@ -51,3 +51,12 @@ interface UiDisplayable {
     val title: String
     val description: String
 }
+
+// Sealed interface for connection state mapping (superset - has extra Reconnecting state)
+sealed interface UiConnectionState {
+    data object Disconnected : UiConnectionState
+    data object Connecting : UiConnectionState
+    data object Reconnecting : UiConnectionState  // Extra state not in Domain
+    data class Connected(val deviceId: Int, val serverVersion: String) : UiConnectionState
+    data class Error(val message: String) : UiConnectionState
+}
