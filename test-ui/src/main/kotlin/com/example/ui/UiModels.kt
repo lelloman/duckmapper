@@ -45,3 +45,9 @@ data class SimpleItem(
     val id: String,
     val name: String
 )
+
+// Interface for @DuckImplement testing - generates implementation class
+interface UiDisplayable {
+    val title: String
+    val description: String
+}

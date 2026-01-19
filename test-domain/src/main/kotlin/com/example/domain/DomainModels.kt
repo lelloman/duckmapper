@@ -45,3 +45,25 @@ interface Identifiable {
     val id: String
     val name: String
 }
+
+// Interface for @DuckWrap testing - source must implement target interface
+interface DomainDisplayable {
+    val title: String
+    val description: String
+}
+
+// Concrete class for @DuckWrap testing - implements the interface
+// @DuckWrap creates a wrapper that hides implementation details
+data class DomainItem(
+    override val title: String,
+    override val description: String,
+    val extraData: String  // Additional property not in interface (hidden by wrapper)
+) : DomainDisplayable
+
+// Concrete class for @DuckImplement testing - does NOT implement interface
+// @DuckImplement generates an implementation by copying values
+data class DomainDetails(
+    val title: String,
+    val description: String,
+    val metadata: String
+)

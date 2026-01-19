@@ -10,11 +10,31 @@ class DuckMapProcessor(
     private val logger: KSPLogger
 ) : SymbolProcessor {
 
-    override fun process(resolver: Resolver): List<KSAnnotated> {
-        val annotationName = "com.github.lelloman.duckmapper.DuckMap"
-        val symbols = resolver.getSymbolsWithAnnotation(annotationName)
+    companion object {
+        private const val DUCK_MAP = "com.github.lelloman.duckmapper.DuckMap"
+        private const val DUCK_WRAP = "com.github.lelloman.duckmapper.DuckWrap"
+        private const val DUCK_IMPLEMENT = "com.github.lelloman.duckmapper.DuckImplement"
+    }
 
-        val mappingDeclarations = mutableListOf<MappingDeclaration>()
+    override fun process(resolver: Resolver): List<KSAnnotated> {
+        val mappingDeclarations = collectDeclarations(resolver, DUCK_MAP)
+        val wrapDeclarations = collectDeclarations(resolver, DUCK_WRAP)
+        val implementDeclarations = collectDeclarations(resolver, DUCK_IMPLEMENT)
+
+        if (mappingDeclarations.isEmpty() && wrapDeclarations.isEmpty() && implementDeclarations.isEmpty()) {
+            return emptyList()
+        }
+
+        val mappingRegistry = MappingRegistry(mappingDeclarations)
+        val generator = MapperGenerator(codeGenerator, logger, mappingRegistry)
+        generator.generate(mappingDeclarations, wrapDeclarations, implementDeclarations)
+
+        return emptyList()
+    }
+
+    private fun collectDeclarations(resolver: Resolver, annotationName: String): List<MappingDeclaration> {
+        val declarations = mutableSetOf<MappingDeclaration>()
+        val symbols = resolver.getSymbolsWithAnnotation(annotationName)
 
         symbols.filterIsInstance<KSClassDeclaration>().forEach { classDecl ->
             classDecl.annotations
@@ -32,7 +52,7 @@ class DuckMapProcessor(
                         val targetDecl = targetType.declaration as? KSClassDeclaration
 
                         if (sourceDecl != null && targetDecl != null) {
-                            mappingDeclarations.add(
+                            declarations.add(
                                 MappingDeclaration(
                                     source = sourceDecl,
                                     target = targetDecl,
@@ -44,15 +64,7 @@ class DuckMapProcessor(
                 }
         }
 
-        if (mappingDeclarations.isEmpty()) {
-            return emptyList()
-        }
-
-        val mappingRegistry = MappingRegistry(mappingDeclarations)
-        val generator = MapperGenerator(codeGenerator, logger, mappingRegistry)
-        generator.generate(mappingDeclarations)
-
-        return emptyList()
+        return declarations.toList()
     }
 }
 
@@ -60,7 +72,24 @@ data class MappingDeclaration(
     val source: KSClassDeclaration,
     val target: KSClassDeclaration,
     val annotatedClass: KSClassDeclaration
-)
+) {
+    // Use qualified names for equality to avoid duplicates
+    private val sourceQName = source.qualifiedName?.asString()
+    private val targetQName = target.qualifiedName?.asString()
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is MappingDeclaration) return false
+        return sourceQName == other.source.qualifiedName?.asString() &&
+                targetQName == other.target.qualifiedName?.asString()
+    }
+
+    override fun hashCode(): Int {
+        var result = sourceQName?.hashCode() ?: 0
+        result = 31 * result + (targetQName?.hashCode() ?: 0)
+        return result
+    }
+}
 
 class MappingRegistry(declarations: List<MappingDeclaration>) {
     private val mappings: Set<Pair<String, String>>

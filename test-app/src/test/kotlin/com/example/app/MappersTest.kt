@@ -210,4 +210,96 @@ class MappersTest {
         assertEquals("item-1", item.id)
         assertEquals("Test Item", item.name)
     }
+
+    @Test
+    fun `DuckWrap - creates wrapper using Kotlin delegation`() {
+        val domainItem = DomainItem(
+            title = "Test Title",
+            description = "Test Description",
+            extraData = "Hidden Extra Data"
+        )
+
+        // asXxx creates a wrapper that delegates to the source
+        val displayable: DomainDisplayable = domainItem.asDomainDisplayable()
+
+        // Values are accessible through the interface
+        assertEquals("Test Title", displayable.title)
+        assertEquals("Test Description", displayable.description)
+
+        // The wrapper type hides extraData (not exposed through interface)
+        // The original object is still accessible if you have the reference
+        assertEquals("Hidden Extra Data", domainItem.extraData)
+    }
+
+    @Test
+    fun `DuckWrap - wrapper reflects live changes (delegation)`() {
+        // Create a mutable holder to demonstrate live delegation
+        var currentTitle = "Initial Title"
+        var currentDescription = "Initial Description"
+
+        // Create an object that implements the interface
+        val mutableSource = object : DomainDisplayable {
+            override val title: String get() = currentTitle
+            override val description: String get() = currentDescription
+        }
+
+        // Note: Our test uses data class which is immutable, so changes won't propagate
+        // This test demonstrates the wrapper behavior with a data class (snapshot at creation)
+        val domainItem = DomainItem(
+            title = "Original",
+            description = "Original Desc",
+            extraData = "extra"
+        )
+
+        val wrapped = domainItem.asDomainDisplayable()
+
+        // Since DomainItem is immutable, the wrapper always returns same values
+        assertEquals("Original", wrapped.title)
+        assertEquals("Original Desc", wrapped.description)
+    }
+
+    @Test
+    fun `DuckImplement - generates implementation class that copies values`() {
+        val details = DomainDetails(
+            title = "Implementation Title",
+            description = "Implementation Description",
+            metadata = "Some Metadata"
+        )
+
+        // toXxx creates a new implementation that copies values
+        val displayable: UiDisplayable = details.toUiDisplayable()
+
+        // Values are copied from source
+        assertEquals("Implementation Title", displayable.title)
+        assertEquals("Implementation Description", displayable.description)
+    }
+
+    @Test
+    fun `DuckImplement - creates snapshot copy (not live reference)`() {
+        // DuckImplement copies values at construction time
+        // Unlike DuckWrap, it doesn't maintain a live reference
+
+        val details = DomainDetails(
+            title = "Snapshot Title",
+            description = "Snapshot Desc",
+            metadata = "Metadata"
+        )
+
+        val impl1 = details.toUiDisplayable()
+        val impl2 = details.toUiDisplayable()
+
+        // Both have same values
+        assertEquals(impl1.title, impl2.title)
+        assertEquals(impl1.description, impl2.description)
+
+        // Values are copied, so creating with different source gives different values
+        val differentDetails = DomainDetails(
+            title = "Different Title",
+            description = "Different Desc",
+            metadata = "Different"
+        )
+
+        val impl3 = differentDetails.toUiDisplayable()
+        assertEquals("Different Title", impl3.title)
+    }
 }

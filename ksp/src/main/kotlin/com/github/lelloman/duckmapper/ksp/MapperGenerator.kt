@@ -12,14 +12,27 @@ class MapperGenerator(
     private val logger: KSPLogger,
     private val mappingRegistry: MappingRegistry
 ) {
-    fun generate(declarations: List<MappingDeclaration>) {
-        val declarationsByFile = declarations.groupBy { it.annotatedClass.containingFile }
+    fun generate(
+        mappingDeclarations: List<MappingDeclaration>,
+        wrapDeclarations: List<MappingDeclaration> = emptyList(),
+        implementDeclarations: List<MappingDeclaration> = emptyList()
+    ) {
+        val allDeclarations = (mappingDeclarations + wrapDeclarations + implementDeclarations).distinct()
+        if (allDeclarations.isEmpty()) return
 
-        declarationsByFile.forEach { (_, mappings) ->
-            val packageName = mappings.first().annotatedClass.packageName.asString()
+        // Convert lists to sets for efficient lookup
+        val wrapDeclSet = wrapDeclarations.toSet()
+        val implDeclSet = implementDeclarations.toSet()
+
+        val declarationsByFile = allDeclarations.groupBy { it.annotatedClass.containingFile?.filePath }
+
+        declarationsByFile.forEach { (_, allMappings) ->
+            val packageName = allMappings.first().annotatedClass.packageName.asString()
             val fileName = "DuckMappers"
 
             val fileSpec = FileSpec.builder(packageName, fileName).apply {
+                // Process @DuckMap declarations
+                val mappings = allMappings.filter { it !in wrapDeclSet && it !in implDeclSet }
                 mappings.forEach { mapping ->
                     val forwardResult = generateMapper(mapping.source, mapping.target)
                     val reverseResult = generateMapper(mapping.target, mapping.source)
@@ -36,11 +49,37 @@ class MapperGenerator(
                         is MapperResult.Skipped -> { /* silently skip */ }
                     }
                 }
+
+                // Process @DuckWrap declarations
+                val wraps = allMappings.filter { it in wrapDeclSet }
+                wraps.forEach { wrap ->
+                    val result = generateWrapper(wrap.source, wrap.target)
+                    when (result) {
+                        is WrapperResult.Success -> {
+                            addType(result.typeSpec)
+                            addFunction(result.funSpec)
+                        }
+                        is WrapperResult.Error -> logger.error(result.message, wrap.annotatedClass)
+                    }
+                }
+
+                // Process @DuckImplement declarations
+                val implements = allMappings.filter { it in implDeclSet }
+                implements.forEach { impl ->
+                    val result = generateImplementation(impl.source, impl.target)
+                    when (result) {
+                        is WrapperResult.Success -> {
+                            addType(result.typeSpec)
+                            addFunction(result.funSpec)
+                        }
+                        is WrapperResult.Error -> logger.error(result.message, impl.annotatedClass)
+                    }
+                }
             }.build()
 
             val dependencies = Dependencies(
                 aggregating = true,
-                sources = declarations.mapNotNull { it.annotatedClass.containingFile }.toTypedArray()
+                sources = allDeclarations.mapNotNull { it.annotatedClass.containingFile }.toTypedArray()
             )
 
             codeGenerator.createNewFile(dependencies, packageName, fileName).use { output ->
@@ -383,6 +422,111 @@ class MapperGenerator(
         )
     }
 
+    private fun generateWrapper(source: KSClassDeclaration, target: KSClassDeclaration): WrapperResult {
+        val sourceTypeName = source.toClassName()
+        val targetTypeName = target.toClassName()
+        val targetSimpleName = target.simpleName.asString()
+
+        // Target must be an interface
+        if (target.classKind != ClassKind.INTERFACE) {
+            return WrapperResult.Error(
+                "@DuckWrap target must be an interface: ${target.qualifiedName?.asString()}"
+            )
+        }
+
+        // Generate: internal class DuckWrap<TargetName>(private val wrapped: <Source>) : <Target> by wrapped
+        val wrapperClassName = "DuckWrap$targetSimpleName"
+
+        val typeSpec = TypeSpec.classBuilder(wrapperClassName)
+            .addModifiers(KModifier.INTERNAL)
+            .primaryConstructor(
+                FunSpec.constructorBuilder()
+                    .addParameter("wrapped", sourceTypeName)
+                    .build()
+            )
+            .addProperty(
+                PropertySpec.builder("wrapped", sourceTypeName, KModifier.PRIVATE)
+                    .initializer("wrapped")
+                    .build()
+            )
+            .addSuperinterface(targetTypeName, CodeBlock.of("wrapped"))
+            .build()
+
+        // Generate: fun <Source>.as<Target>(): <Target> = DuckWrap<TargetName>(this)
+        val extensionFunSpec = FunSpec.builder("as$targetSimpleName")
+            .receiver(sourceTypeName)
+            .returns(targetTypeName)
+            .addStatement("return %N(this)", wrapperClassName)
+            .build()
+
+        return WrapperResult.Success(typeSpec, extensionFunSpec)
+    }
+
+    private fun generateImplementation(source: KSClassDeclaration, target: KSClassDeclaration): WrapperResult {
+        val sourceTypeName = source.toClassName()
+        val targetTypeName = target.toClassName()
+        val targetSimpleName = target.simpleName.asString()
+
+        // Target must be an interface
+        if (target.classKind != ClassKind.INTERFACE) {
+            return WrapperResult.Error(
+                "@DuckImplement target must be an interface: ${target.qualifiedName?.asString()}"
+            )
+        }
+
+        // Get all properties from the interface that need to be implemented
+        val interfaceProperties = target.getAllProperties().toList()
+
+        // Get source properties
+        val sourceProps = source.getAllProperties().associateBy { it.simpleName.asString() }
+
+        // Validate all interface properties exist in source
+        val propertyOverrides = mutableListOf<PropertySpec>()
+        for (prop in interfaceProperties) {
+            val propName = prop.simpleName.asString()
+            val sourceProp = sourceProps[propName]
+
+            if (sourceProp == null) {
+                return WrapperResult.Error(
+                    "@DuckImplement: source ${source.qualifiedName?.asString()} is missing property '$propName' " +
+                            "required by interface ${target.qualifiedName?.asString()}"
+                )
+            }
+
+            val propType = prop.type.resolve().toTypeName()
+
+            propertyOverrides.add(
+                PropertySpec.builder(propName, propType)
+                    .addModifiers(KModifier.OVERRIDE)
+                    .initializer("source.$propName")
+                    .build()
+            )
+        }
+
+        // Generate: internal class DuckImpl<TargetName>(source: <Source>) : <Target> { override val ... }
+        val implClassName = "DuckImpl$targetSimpleName"
+
+        val typeSpec = TypeSpec.classBuilder(implClassName)
+            .addModifiers(KModifier.INTERNAL)
+            .primaryConstructor(
+                FunSpec.constructorBuilder()
+                    .addParameter("source", sourceTypeName)
+                    .build()
+            )
+            .addSuperinterface(targetTypeName)
+            .addProperties(propertyOverrides)
+            .build()
+
+        // Generate: fun <Source>.to<Target>(): <Target> = DuckImpl<TargetName>(this)
+        val extensionFunSpec = FunSpec.builder("to$targetSimpleName")
+            .receiver(sourceTypeName)
+            .returns(targetTypeName)
+            .addStatement("return %N(this)", implClassName)
+            .build()
+
+        return WrapperResult.Success(typeSpec, extensionFunSpec)
+    }
+
     private fun buildConstructorCall(
         targetTypeName: ClassName,
         mappings: List<PropertyMapping>
@@ -461,4 +605,9 @@ sealed class MapperResult {
 sealed class PropertyMappingResult {
     data class Success(val mapping: PropertyMapping) : PropertyMappingResult()
     data class Error(val message: String) : PropertyMappingResult()
+}
+
+sealed class WrapperResult {
+    data class Success(val typeSpec: TypeSpec, val funSpec: FunSpec) : WrapperResult()
+    data class Error(val message: String) : WrapperResult()
 }
