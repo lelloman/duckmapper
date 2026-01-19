@@ -202,6 +202,80 @@ data class UiUser(
 // Fails: UiUser → DomainUser (missing required property)
 ```
 
+### Interface Wrapping with @DuckWrap
+
+`@DuckWrap` generates a wrapper class using Kotlin's delegation (`by` keyword). The source class must implement the target interface:
+
+```kotlin
+interface Displayable {
+    val title: String
+    val description: String
+}
+
+data class Article(
+    override val title: String,
+    override val description: String,
+    val internalId: String  // Hidden from interface
+) : Displayable
+
+@DuckWrap(Article::class, Displayable::class)
+object Mappings
+```
+
+Generated code:
+```kotlin
+internal class DuckWrapDisplayable(
+    private val wrapped: Article
+) : Displayable by wrapped
+
+fun Article.asDisplayable(): Displayable = DuckWrapDisplayable(this)
+```
+
+Use case: Hide implementation details while exposing only the interface. The wrapper maintains a live reference to the source.
+
+### Interface Implementation with @DuckImplement
+
+`@DuckImplement` generates an implementation class that copies property values. The source doesn't need to implement the interface - it just needs matching properties:
+
+```kotlin
+interface UiDisplayable {
+    val title: String
+    val description: String
+}
+
+// Note: Does NOT implement UiDisplayable
+data class ApiResponse(
+    val title: String,
+    val description: String,
+    val metadata: String
+)
+
+@DuckImplement(ApiResponse::class, UiDisplayable::class)
+object Mappings
+```
+
+Generated code:
+```kotlin
+internal class DuckImplUiDisplayable(
+    source: ApiResponse
+) : UiDisplayable {
+    override val title: String = source.title
+    override val description: String = source.description
+}
+
+fun ApiResponse.toUiDisplayable(): UiDisplayable = DuckImplUiDisplayable(this)
+```
+
+Use case: Create an interface implementation from any class with matching properties. Values are copied at construction time (snapshot, not live reference).
+
+**Key differences:**
+| Feature | @DuckWrap | @DuckImplement |
+|---------|-----------|----------------|
+| Source requirement | Must implement target interface | Just needs matching properties |
+| Extension function | `as<Target>()` | `to<Target>()` |
+| Value behavior | Live delegation | Snapshot copy |
+| Generated class | Uses `by` delegation | Explicit property overrides |
+
 ## Error Messages
 
 DuckMapper provides clear compile-time errors:
