@@ -24,16 +24,16 @@ class MapperGenerator(
                     val forwardResult = generateMapper(mapping.source, mapping.target)
                     val reverseResult = generateMapper(mapping.target, mapping.source)
 
-                    if (forwardResult is MapperResult.Success) {
-                        addFunction(forwardResult.funSpec)
-                    } else if (forwardResult is MapperResult.Error) {
-                        logger.error(forwardResult.message, mapping.annotatedClass)
+                    when (forwardResult) {
+                        is MapperResult.Success -> addFunction(forwardResult.funSpec)
+                        is MapperResult.Error -> logger.error(forwardResult.message, mapping.annotatedClass)
+                        is MapperResult.Skipped -> { /* silently skip */ }
                     }
 
-                    if (reverseResult is MapperResult.Success) {
-                        addFunction(reverseResult.funSpec)
-                    } else if (reverseResult is MapperResult.Error) {
-                        logger.error(reverseResult.message, mapping.annotatedClass)
+                    when (reverseResult) {
+                        is MapperResult.Success -> addFunction(reverseResult.funSpec)
+                        is MapperResult.Error -> logger.error(reverseResult.message, mapping.annotatedClass)
+                        is MapperResult.Skipped -> { /* silently skip */ }
                     }
                 }
             }.build()
@@ -114,6 +114,12 @@ class MapperGenerator(
         val sourceTypeName = source.toClassName()
         val targetTypeName = target.toClassName()
         val functionName = "to${target.simpleName.asString()}"
+
+        // Target must be instantiable (not an interface or abstract class)
+        // Skip silently - this allows interface->class mapping without generating class->interface
+        if (target.classKind == ClassKind.INTERFACE) {
+            return MapperResult.Skipped
+        }
 
         val sourceProps = source.getAllProperties().associateBy { it.simpleName.asString() }
         val targetProps = target.getAllProperties().toList()
@@ -449,6 +455,7 @@ enum class PropertyMappingType {
 sealed class MapperResult {
     data class Success(val funSpec: FunSpec) : MapperResult()
     data class Error(val message: String) : MapperResult()
+    data object Skipped : MapperResult()
 }
 
 sealed class PropertyMappingResult {

@@ -196,4 +196,18 @@ class MappersTest {
 
         assertEquals(original, converted)
     }
+
+    @Test
+    fun `interface mapping - Identifiable to SimpleItem`() {
+        // Any class implementing Identifiable can be mapped
+        val identifiable = object : Identifiable {
+            override val id = "item-1"
+            override val name = "Test Item"
+        }
+
+        val item = identifiable.toSimpleItem()
+
+        assertEquals("item-1", item.id)
+        assertEquals("Test Item", item.name)
+    }
 }

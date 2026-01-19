@@ -39,3 +39,9 @@ enum class DomainStatusExtended {
     INACTIVE,
     ARCHIVED
 }
+
+// Interface as source - common pattern for API responses
+interface Identifiable {
+    val id: String
+    val name: String
+}

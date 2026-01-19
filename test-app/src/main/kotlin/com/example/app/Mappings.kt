@@ -10,4 +10,5 @@ import com.example.ui.*
 @DuckMap(DomainTeam::class, UiTeam::class)
 @DuckMap(DomainId::class, UiId::class)
 @DuckMap(DomainCache::class, UiCache::class)
+@DuckMap(Identifiable::class, SimpleItem::class)
 object Mappings

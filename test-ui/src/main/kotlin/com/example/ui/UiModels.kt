@@ -39,3 +39,9 @@ enum class UiStatusExtended {
     INACTIVE,
     ARCHIVED
 }
+
+// Target class for interface mapping
+data class SimpleItem(
+    val id: String,
+    val name: String
+)
