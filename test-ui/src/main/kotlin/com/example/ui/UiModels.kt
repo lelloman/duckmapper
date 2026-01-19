@@ -4,7 +4,8 @@ data class UiUser(
     val id: String,
     val name: String,
     val email: String,
-    val address: UiAddress
+    val address: UiAddress,
+    val status: UiStatus
 )
 
 data class UiAddress(
@@ -24,3 +25,17 @@ data class UiId(val value: String)
 data class UiCache(
     val entries: Map<UiId, UiUser>
 )
+
+// Enum with same values as DomainStatus - bidirectional mapping works
+enum class UiStatus {
+    PENDING,
+    ACTIVE
+}
+
+// Enum with more values - can receive from DomainStatus, but not map back
+enum class UiStatusExtended {
+    PENDING,
+    ACTIVE,
+    INACTIVE,
+    ARCHIVED
+}

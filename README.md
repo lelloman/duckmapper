@@ -119,6 +119,34 @@ fun DomainUser.toUiUser(): UiUser = UiUser(
 )
 ```
 
+### Enums
+
+DuckMapper generates exhaustive `when` expressions for enum mapping:
+
+```kotlin
+// domain
+enum class DomainStatus { PENDING, ACTIVE }
+
+// ui
+enum class UiStatus { PENDING, ACTIVE, INACTIVE }
+
+// app - explicit mapping required
+@DuckMap(DomainStatus::class, UiStatus::class)
+object Mappings
+```
+
+Generated code:
+```kotlin
+fun DomainStatus.toUiStatus(): UiStatus = when (this) {
+    DomainStatus.PENDING -> UiStatus.PENDING
+    DomainStatus.ACTIVE -> UiStatus.ACTIVE
+}
+```
+
+**Validation rules:**
+- ✅ Subset → Superset: OK (all source values exist in target)
+- ❌ Superset → Subset: ERROR (source has values not in target)
+
 ### Collections
 
 DuckMapper supports `List`, `Array`, and `Map` with automatic element mapping:

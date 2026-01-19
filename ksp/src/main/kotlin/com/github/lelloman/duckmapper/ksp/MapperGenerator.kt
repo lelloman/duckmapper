@@ -52,6 +52,65 @@ class MapperGenerator(
     }
 
     private fun generateMapper(source: KSClassDeclaration, target: KSClassDeclaration): MapperResult {
+        // Check if both are enums
+        val sourceIsEnum = source.classKind == ClassKind.ENUM_CLASS
+        val targetIsEnum = target.classKind == ClassKind.ENUM_CLASS
+
+        if (sourceIsEnum && targetIsEnum) {
+            return generateEnumMapper(source, target)
+        } else if (sourceIsEnum || targetIsEnum) {
+            return MapperResult.Error(
+                "Cannot map between enum and non-enum: ${source.qualifiedName?.asString()} -> ${target.qualifiedName?.asString()}"
+            )
+        }
+
+        return generateDataClassMapper(source, target)
+    }
+
+    private fun generateEnumMapper(source: KSClassDeclaration, target: KSClassDeclaration): MapperResult {
+        val sourceTypeName = source.toClassName()
+        val targetTypeName = target.toClassName()
+        val functionName = "to${target.simpleName.asString()}"
+
+        val sourceEntries = source.declarations
+            .filterIsInstance<KSClassDeclaration>()
+            .filter { it.classKind == ClassKind.ENUM_ENTRY }
+            .map { it.simpleName.asString() }
+            .toList()
+
+        val targetEntries = target.declarations
+            .filterIsInstance<KSClassDeclaration>()
+            .filter { it.classKind == ClassKind.ENUM_ENTRY }
+            .map { it.simpleName.asString() }
+            .toSet()
+
+        // Check that all source entries exist in target (subset -> superset is OK)
+        val missingEntries = sourceEntries.filter { it !in targetEntries }
+        if (missingEntries.isNotEmpty()) {
+            return MapperResult.Error(
+                "Cannot map ${source.qualifiedName?.asString()} to ${target.qualifiedName?.asString()}: " +
+                        "source enum values [${missingEntries.joinToString(", ")}] have no matching values in target"
+            )
+        }
+
+        val whenBlock = CodeBlock.builder().apply {
+            beginControlFlow("when (this)")
+            sourceEntries.forEach { entry ->
+                addStatement("%T.%L -> %T.%L", sourceTypeName, entry, targetTypeName, entry)
+            }
+            endControlFlow()
+        }.build()
+
+        val funSpec = FunSpec.builder(functionName)
+            .receiver(sourceTypeName)
+            .returns(targetTypeName)
+            .addStatement("return %L", whenBlock)
+            .build()
+
+        return MapperResult.Success(funSpec)
+    }
+
+    private fun generateDataClassMapper(source: KSClassDeclaration, target: KSClassDeclaration): MapperResult {
         val sourceTypeName = source.toClassName()
         val targetTypeName = target.toClassName()
         val functionName = "to${target.simpleName.asString()}"

@@ -38,12 +38,25 @@ class MappersTest {
     }
 
     @Test
+    fun `enum mapping - DomainStatus to UiStatus`() {
+        assertEquals(UiStatus.PENDING, DomainStatus.PENDING.toUiStatus())
+        assertEquals(UiStatus.ACTIVE, DomainStatus.ACTIVE.toUiStatus())
+    }
+
+    @Test
+    fun `enum mapping - UiStatus to DomainStatus`() {
+        assertEquals(DomainStatus.PENDING, UiStatus.PENDING.toDomainStatus())
+        assertEquals(DomainStatus.ACTIVE, UiStatus.ACTIVE.toDomainStatus())
+    }
+
+    @Test
     fun `nested type mapping - DomainUser to UiUser`() {
         val domain = DomainUser(
             id = "user-1",
             name = "John Doe",
             email = "john@example.com",
-            address = DomainAddress("123 Main St", "Springfield", "12345")
+            address = DomainAddress("123 Main St", "Springfield", "12345"),
+            status = DomainStatus.ACTIVE
         )
 
         val ui = domain.toUiUser()
@@ -54,6 +67,7 @@ class MappersTest {
         assertEquals("123 Main St", ui.address.street)
         assertEquals("Springfield", ui.address.city)
         assertEquals("12345", ui.address.zipCode)
+        assertEquals(UiStatus.ACTIVE, ui.status)
     }
 
     @Test
@@ -62,7 +76,8 @@ class MappersTest {
             id = "user-2",
             name = "Jane Doe",
             email = "jane@example.com",
-            address = UiAddress("456 Oak Ave", "Shelbyville", "67890")
+            address = UiAddress("456 Oak Ave", "Shelbyville", "67890"),
+            status = UiStatus.PENDING
         )
 
         val domain = ui.toDomainUser()
@@ -73,6 +88,7 @@ class MappersTest {
         assertEquals("456 Oak Ave", domain.address.street)
         assertEquals("Shelbyville", domain.address.city)
         assertEquals("67890", domain.address.zipCode)
+        assertEquals(DomainStatus.PENDING, domain.status)
     }
 
     @Test
@@ -81,8 +97,8 @@ class MappersTest {
             id = "team-1",
             name = "Engineering",
             members = listOf(
-                DomainUser("u1", "Alice", "alice@example.com", DomainAddress("1 St", "City1", "11111")),
-                DomainUser("u2", "Bob", "bob@example.com", DomainAddress("2 St", "City2", "22222"))
+                DomainUser("u1", "Alice", "alice@example.com", DomainAddress("1 St", "City1", "11111"), DomainStatus.ACTIVE),
+                DomainUser("u2", "Bob", "bob@example.com", DomainAddress("2 St", "City2", "22222"), DomainStatus.PENDING)
             )
         )
 
@@ -94,6 +110,8 @@ class MappersTest {
         assertEquals("Alice", ui.members[0].name)
         assertEquals("Bob", ui.members[1].name)
         assertEquals("1 St", ui.members[0].address.street)
+        assertEquals(UiStatus.ACTIVE, ui.members[0].status)
+        assertEquals(UiStatus.PENDING, ui.members[1].status)
     }
 
     @Test
@@ -102,7 +120,7 @@ class MappersTest {
             id = "team-2",
             name = "Design",
             members = listOf(
-                UiUser("u3", "Carol", "carol@example.com", UiAddress("3 St", "City3", "33333"))
+                UiUser("u3", "Carol", "carol@example.com", UiAddress("3 St", "City3", "33333"), UiStatus.ACTIVE)
             )
         )
 
@@ -112,14 +130,15 @@ class MappersTest {
         assertEquals("Design", domain.name)
         assertEquals(1, domain.members.size)
         assertEquals("Carol", domain.members[0].name)
+        assertEquals(DomainStatus.ACTIVE, domain.members[0].status)
     }
 
     @Test
     fun `map mapping with key and value transformation - DomainCache to UiCache`() {
         val domain = DomainCache(
             entries = mapOf(
-                DomainId("id-1") to DomainUser("u1", "Alice", "alice@example.com", DomainAddress("1 St", "City1", "11111")),
-                DomainId("id-2") to DomainUser("u2", "Bob", "bob@example.com", DomainAddress("2 St", "City2", "22222"))
+                DomainId("id-1") to DomainUser("u1", "Alice", "alice@example.com", DomainAddress("1 St", "City1", "11111"), DomainStatus.ACTIVE),
+                DomainId("id-2") to DomainUser("u2", "Bob", "bob@example.com", DomainAddress("2 St", "City2", "22222"), DomainStatus.PENDING)
             )
         )
 
@@ -136,7 +155,7 @@ class MappersTest {
     fun `map mapping with key and value transformation - UiCache to DomainCache`() {
         val ui = UiCache(
             entries = mapOf(
-                UiId("id-3") to UiUser("u3", "Carol", "carol@example.com", UiAddress("3 St", "City3", "33333"))
+                UiId("id-3") to UiUser("u3", "Carol", "carol@example.com", UiAddress("3 St", "City3", "33333"), UiStatus.ACTIVE)
             )
         )
 
@@ -153,7 +172,8 @@ class MappersTest {
             id = "roundtrip-1",
             name = "Test User",
             email = "test@example.com",
-            address = DomainAddress("Test St", "Test City", "00000")
+            address = DomainAddress("Test St", "Test City", "00000"),
+            status = DomainStatus.ACTIVE
         )
 
         val converted = original.toUiUser().toDomainUser()
@@ -167,8 +187,8 @@ class MappersTest {
             id = "team-rt",
             name = "Roundtrip Team",
             members = listOf(
-                DomainUser("u1", "Member1", "m1@example.com", DomainAddress("1 St", "C1", "11111")),
-                DomainUser("u2", "Member2", "m2@example.com", DomainAddress("2 St", "C2", "22222"))
+                DomainUser("u1", "Member1", "m1@example.com", DomainAddress("1 St", "C1", "11111"), DomainStatus.PENDING),
+                DomainUser("u2", "Member2", "m2@example.com", DomainAddress("2 St", "C2", "22222"), DomainStatus.ACTIVE)
             )
         )
 
