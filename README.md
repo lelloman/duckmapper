@@ -1,24 +1,15 @@
 # DuckMapper
 
-A Kotlin KSP plugin for generating structural mappers between classes that share the same structure but live in independent modules.
+A Kotlin KSP plugin for generating structural mappers between classes that share the same structure.
 
 *If it quacks the same, it should map automatically.*
 
 ## The Problem
 
-In clean architecture setups, you often have:
-
-```
-       Module app (glue)
-        /           \
-   Module domain    Module ui
-   (DomainUser)     (UiUser)
-```
-
-`domain` and `ui` are intentionally independent - neither depends on the other. But when `DomainUser` and `UiUser` have identical structures, you end up writing tedious 1:1 mapping code in `app`:
+When you have separate models for different layers (API DTOs, database entities, domain models, UI models), you end up writing tedious mapping code:
 
 ```kotlin
-fun DomainUser.toUiUser() = UiUser(
+fun UserDto.toUser() = User(
     id = this.id,
     name = this.name,
     email = this.email
@@ -56,10 +47,10 @@ dependencies {
 
 ### Basic Mapping
 
-Declare your mapping in the glue module:
+Declare your mapping:
 
 ```kotlin
-@DuckMap(DomainUser::class, UiUser::class)
+@DuckMap(UserDto::class, User::class)
 object Mappings
 ```
 
@@ -67,13 +58,13 @@ DuckMapper generates bidirectional extension functions:
 
 ```kotlin
 // Generated
-fun DomainUser.toUiUser(): UiUser = UiUser(
+fun UserDto.toUser(): User = User(
     id = this.id,
     name = this.name,
     email = this.email
 )
 
-fun UiUser.toDomainUser(): DomainUser = DomainUser(
+fun User.toUserDto(): UserDto = UserDto(
     id = this.id,
     name = this.name,
     email = this.email
@@ -85,10 +76,10 @@ fun UiUser.toDomainUser(): DomainUser = DomainUser(
 Stack multiple annotations on a single object:
 
 ```kotlin
-@DuckMap(DomainUser::class, UiUser::class)
-@DuckMap(DomainAddress::class, UiAddress::class)
-@DuckMap(DomainSettings::class, UiSettings::class)
-object AppMappings
+@DuckMap(UserDto::class, User::class)
+@DuckMap(AddressDto::class, Address::class)
+@DuckMap(OrderEntity::class, Order::class)
+object Mappings
 ```
 
 ### Nested Types
@@ -231,77 +222,31 @@ No @DuckMap declaration found for these types.
 Property 'nickname': cannot map nullable type to non-nullable type (kotlin.String? -> kotlin.String)
 ```
 
-## Key Design Principle
+## Example
 
-**The annotation lives in the glue module only.** Neither the source nor target class needs any annotation. This keeps your `domain` and `ui` modules completely clean and independent.
-
-## Android Example
-
-Here's a typical Android clean architecture setup:
-
-```
-app/
-├── build.gradle.kts          # Has KSP plugin + DuckMapper dependencies
-└── src/main/kotlin/
-    └── com/example/app/
-        └── Mappings.kt       # @DuckMap declarations here
-
-domain/
-├── build.gradle.kts          # Pure Kotlin, no DuckMapper dependency
-└── src/main/kotlin/
-    └── com/example/domain/
-        └── Models.kt         # DomainUser, DomainAddress, etc.
-
-presentation/
-├── build.gradle.kts          # Pure Kotlin, no DuckMapper dependency
-└── src/main/kotlin/
-    └── com/example/ui/
-        └── Models.kt         # UiUser, UiAddress, etc.
-```
-
-**app/build.gradle.kts:**
 ```kotlin
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("com.google.devtools.ksp")
-}
+// Data layer - API response
+data class UserDto(
+    val id: String,
+    val name: String,
+    val email: String
+)
 
-dependencies {
-    implementation(project(":domain"))
-    implementation(project(":presentation"))
+// Domain layer
+data class User(
+    val id: String,
+    val name: String,
+    val email: String
+)
 
-    implementation("com.github.lelloman.duckmapper:annotations:0.1.0")
-    ksp("com.github.lelloman.duckmapper:ksp:0.1.0")
-}
-```
-
-**app/src/main/kotlin/.../Mappings.kt:**
-```kotlin
-package com.example.app
-
-import com.github.lelloman.duckmapper.DuckMap
-import com.example.domain.*
-import com.example.ui.*
-
-@DuckMap(DomainAddress::class, UiAddress::class)
-@DuckMap(DomainUser::class, UiUser::class)
-@DuckMap(DomainTeam::class, UiTeam::class)
+// Declare mapping
+@DuckMap(UserDto::class, User::class)
 object Mappings
-```
 
-**Usage in ViewModel:**
-```kotlin
-class UserViewModel(private val getUserUseCase: GetUserUseCase) : ViewModel() {
-
-    private val _user = MutableStateFlow<UiUser?>(null)
-    val user: StateFlow<UiUser?> = _user
-
-    fun loadUser(id: String) {
-        viewModelScope.launch {
-            val domainUser = getUserUseCase(id)
-            _user.value = domainUser.toUiUser()  // Generated extension function
-        }
+// Usage in repository
+class UserRepository(private val api: UserApi) {
+    suspend fun getUser(id: String): User {
+        return api.fetchUser(id).toUser()  // Generated extension function
     }
 }
 ```
@@ -310,8 +255,6 @@ class UserViewModel(private val getUserUseCase: GetUserUseCase) : ViewModel() {
 
 - Kotlin 1.9+
 - KSP 1.9+
-- Classes must be data classes (for now)
-- Property names must match between source and target
 
 ## License
 
