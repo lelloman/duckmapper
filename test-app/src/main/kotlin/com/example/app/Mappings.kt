@@ -3,6 +3,7 @@ package com.example.app
 import com.github.lelloman.duckmapper.DuckMap
 import com.github.lelloman.duckmapper.DuckWrap
 import com.github.lelloman.duckmapper.DuckImplement
+import com.github.lelloman.duckmapper.DuckConvert
 import com.example.domain.*
 import com.example.ui.*
 
@@ -19,4 +20,9 @@ import com.example.ui.*
 @DuckImplement(DomainDetails::class, UiDisplayable::class)
 // Sealed interface mapping: Domain (subset) -> Ui (superset with extra Reconnecting state)
 @DuckMap(DomainConnectionState::class, UiConnectionState::class)
+// String -> Enum automatic conversion
+@DuckMap(MovieDto::class, Movie::class)
+// Custom converter with fallback for invalid values
+@DuckMap(MovieDtoWithFallback::class, MovieWithFallback::class)
+@DuckConvert(MovieDtoWithFallback::class, MovieWithFallback::class, "availability", StringToAvailabilityWithFallback::class)
 object Mappings

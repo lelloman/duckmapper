@@ -14,22 +14,61 @@ class DuckMapProcessor(
         private const val DUCK_MAP = "com.github.lelloman.duckmapper.DuckMap"
         private const val DUCK_WRAP = "com.github.lelloman.duckmapper.DuckWrap"
         private const val DUCK_IMPLEMENT = "com.github.lelloman.duckmapper.DuckImplement"
+        private const val DUCK_CONVERT = "com.github.lelloman.duckmapper.DuckConvert"
     }
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
         val mappingDeclarations = collectDeclarations(resolver, DUCK_MAP)
         val wrapDeclarations = collectDeclarations(resolver, DUCK_WRAP)
         val implementDeclarations = collectDeclarations(resolver, DUCK_IMPLEMENT)
+        val converterDeclarations = collectConverterDeclarations(resolver)
 
         if (mappingDeclarations.isEmpty() && wrapDeclarations.isEmpty() && implementDeclarations.isEmpty()) {
             return emptyList()
         }
 
         val mappingRegistry = MappingRegistry(mappingDeclarations)
-        val generator = MapperGenerator(codeGenerator, logger, mappingRegistry)
+        val converterRegistry = ConverterRegistry(converterDeclarations)
+        val generator = MapperGenerator(codeGenerator, logger, mappingRegistry, converterRegistry)
         generator.generate(mappingDeclarations, wrapDeclarations, implementDeclarations)
 
         return emptyList()
+    }
+
+    private fun collectConverterDeclarations(resolver: Resolver): List<ConverterDeclaration> {
+        val declarations = mutableListOf<ConverterDeclaration>()
+        val symbols = resolver.getSymbolsWithAnnotation(DUCK_CONVERT)
+
+        symbols.filterIsInstance<KSClassDeclaration>().forEach { classDecl ->
+            classDecl.annotations
+                .filter { it.annotationType.resolve().declaration.qualifiedName?.asString() == DUCK_CONVERT }
+                .forEach { annotation ->
+                    val args = annotation.arguments
+                    val sourceType = (args.find { it.name?.asString() == "source" }?.value as? KSType)
+                    val targetType = (args.find { it.name?.asString() == "target" }?.value as? KSType)
+                    val property = args.find { it.name?.asString() == "property" }?.value as? String
+                    val converterType = (args.find { it.name?.asString() == "converter" }?.value as? KSType)
+
+                    if (sourceType != null && targetType != null && property != null && converterType != null) {
+                        val sourceQName = sourceType.declaration.qualifiedName?.asString()
+                        val targetQName = targetType.declaration.qualifiedName?.asString()
+                        val converterQName = converterType.declaration.qualifiedName?.asString()
+
+                        if (sourceQName != null && targetQName != null && converterQName != null) {
+                            declarations.add(
+                                ConverterDeclaration(
+                                    sourceQualifiedName = sourceQName,
+                                    targetQualifiedName = targetQName,
+                                    propertyName = property,
+                                    converterQualifiedName = converterQName
+                                )
+                            )
+                        }
+                    }
+                }
+        }
+
+        return declarations
     }
 
     private fun collectDeclarations(resolver: Resolver, annotationName: String): List<MappingDeclaration> {
@@ -113,6 +152,30 @@ class MappingRegistry(declarations: List<MappingDeclaration>) {
     fun getMapperFunctionName(sourceQualifiedName: String, targetQualifiedName: String): String {
         val targetSimpleName = targetQualifiedName.substringAfterLast(".")
         return "to$targetSimpleName"
+    }
+}
+
+data class ConverterDeclaration(
+    val sourceQualifiedName: String,
+    val targetQualifiedName: String,
+    val propertyName: String,
+    val converterQualifiedName: String
+)
+
+class ConverterRegistry(declarations: List<ConverterDeclaration>) {
+    // Key: "sourceQName->targetQName", Value: Map of propertyName to converterQName
+    private val converters: Map<String, Map<String, String>>
+
+    init {
+        converters = declarations
+            .groupBy { "${it.sourceQualifiedName}->${it.targetQualifiedName}" }
+            .mapValues { (_, decls) ->
+                decls.associate { it.propertyName to it.converterQualifiedName }
+            }
+    }
+
+    fun getConverters(sourceQualifiedName: String, targetQualifiedName: String): Map<String, String> {
+        return converters["$sourceQualifiedName->$targetQualifiedName"] ?: emptyMap()
     }
 }
 

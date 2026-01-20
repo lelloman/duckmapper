@@ -367,4 +367,115 @@ class MappersTest {
         assert(mapped[2] is UiConnectionState.Connected)
         assert(mapped[3] is UiConnectionState.Error)
     }
+
+    // String <-> Enum automatic conversion tests
+
+    @Test
+    fun `automatic String to Enum conversion - MovieDto to Movie`() {
+        val dto = MovieDto(
+            id = "movie-1",
+            title = "Test Movie",
+            availability = "Available"
+        )
+
+        val movie = dto.toMovie()
+
+        assertEquals("movie-1", movie.id)
+        assertEquals("Test Movie", movie.title)
+        assertEquals(ContentAvailability.Available, movie.availability)
+    }
+
+    @Test
+    fun `automatic String to Enum conversion - all enum values`() {
+        val available = MovieDto("1", "M1", "Available").toMovie()
+        val comingSoon = MovieDto("2", "M2", "ComingSoon").toMovie()
+        val unavailable = MovieDto("3", "M3", "Unavailable").toMovie()
+
+        assertEquals(ContentAvailability.Available, available.availability)
+        assertEquals(ContentAvailability.ComingSoon, comingSoon.availability)
+        assertEquals(ContentAvailability.Unavailable, unavailable.availability)
+    }
+
+    @Test
+    fun `automatic Enum to String conversion - Movie to MovieDto`() {
+        val movie = Movie(
+            id = "movie-2",
+            title = "Another Movie",
+            availability = ContentAvailability.ComingSoon
+        )
+
+        val dto = movie.toMovieDto()
+
+        assertEquals("movie-2", dto.id)
+        assertEquals("Another Movie", dto.title)
+        assertEquals("ComingSoon", dto.availability)
+    }
+
+    @Test
+    fun `roundtrip - MovieDto to Movie and back`() {
+        val original = MovieDto("rt-1", "Roundtrip Movie", "Available")
+
+        val converted = original.toMovie().toMovieDto()
+
+        assertEquals(original, converted)
+    }
+
+    // Custom converter tests
+
+    @Test
+    fun `custom converter - valid enum value`() {
+        val dto = MovieDtoWithFallback(
+            id = "movie-c1",
+            title = "Custom Movie",
+            availability = "Available"
+        )
+
+        val movie = dto.toMovieWithFallback()
+
+        assertEquals("movie-c1", movie.id)
+        assertEquals(ContentAvailability.Available, movie.availability)
+    }
+
+    @Test
+    fun `custom converter - invalid value falls back to Unavailable`() {
+        val dto = MovieDtoWithFallback(
+            id = "movie-c2",
+            title = "Invalid Availability Movie",
+            availability = "InvalidValue"  // This is not a valid enum value
+        )
+
+        val movie = dto.toMovieWithFallback()
+
+        assertEquals("movie-c2", movie.id)
+        // Custom converter should fall back to Unavailable for invalid values
+        assertEquals(ContentAvailability.Unavailable, movie.availability)
+    }
+
+    @Test
+    fun `custom converter - empty string falls back to Unavailable`() {
+        val dto = MovieDtoWithFallback(
+            id = "movie-c3",
+            title = "Empty Availability",
+            availability = ""
+        )
+
+        val movie = dto.toMovieWithFallback()
+
+        assertEquals(ContentAvailability.Unavailable, movie.availability)
+    }
+
+    @Test
+    fun `reverse mapping with custom converter still uses enum name`() {
+        // The reverse mapping (MovieWithFallback -> MovieDtoWithFallback)
+        // should use .name since there's no reverse custom converter
+        val movie = MovieWithFallback(
+            id = "movie-r1",
+            title = "Reverse Movie",
+            availability = ContentAvailability.ComingSoon
+        )
+
+        val dto = movie.toMovieDtoWithFallback()
+
+        assertEquals("ComingSoon", dto.availability)
+    }
 }

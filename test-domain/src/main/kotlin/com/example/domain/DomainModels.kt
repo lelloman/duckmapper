@@ -75,3 +75,44 @@ sealed interface DomainConnectionState {
     data class Connected(val deviceId: Int, val serverVersion: String) : DomainConnectionState
     data class Error(val message: String) : DomainConnectionState
 }
+
+// DTO with String that maps to Enum (for testing automatic String -> Enum conversion)
+data class MovieDto(
+    val id: String,
+    val title: String,
+    val availability: String  // "Available", "ComingSoon", "Unavailable"
+)
+
+enum class ContentAvailability {
+    Available,
+    ComingSoon,
+    Unavailable
+}
+
+data class Movie(
+    val id: String,
+    val title: String,
+    val availability: ContentAvailability
+)
+
+// For testing custom converter with fallback
+data class MovieDtoWithFallback(
+    val id: String,
+    val title: String,
+    val availability: String
+)
+
+data class MovieWithFallback(
+    val id: String,
+    val title: String,
+    val availability: ContentAvailability
+)
+
+// Custom converter object
+object StringToAvailabilityWithFallback {
+    operator fun invoke(value: String): ContentAvailability = try {
+        ContentAvailability.valueOf(value)
+    } catch (_: IllegalArgumentException) {
+        ContentAvailability.Unavailable
+    }
+}

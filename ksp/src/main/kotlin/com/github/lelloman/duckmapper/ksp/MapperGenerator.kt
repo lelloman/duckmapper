@@ -10,7 +10,8 @@ import com.squareup.kotlinpoet.ksp.*
 class MapperGenerator(
     private val codeGenerator: CodeGenerator,
     private val logger: KSPLogger,
-    private val mappingRegistry: MappingRegistry
+    private val mappingRegistry: MappingRegistry,
+    private val converterRegistry: ConverterRegistry = ConverterRegistry(emptyList())
 ) {
     fun generate(
         mappingDeclarations: List<MappingDeclaration>,
@@ -296,6 +297,33 @@ class MapperGenerator(
                             paramName, paramName, keyExpr, valueExpr, comma)
                     }
                 }
+                PropertyMappingType.STRING_TO_ENUM -> {
+                    val enumClass = ClassName.bestGuess(mapping.enumClassName!!)
+                    if (mapping.sourceNullable) {
+                        builder.add("  %N = this.%N?.let { %T.valueOf(it) }%L\n",
+                            paramName, paramName, enumClass, comma)
+                    } else {
+                        builder.add("  %N = %T.valueOf(this.%N)%L\n",
+                            paramName, enumClass, paramName, comma)
+                    }
+                }
+                PropertyMappingType.ENUM_TO_STRING -> {
+                    if (mapping.sourceNullable) {
+                        builder.add("  %N = this.%N?.name%L\n", paramName, paramName, comma)
+                    } else {
+                        builder.add("  %N = this.%N.name%L\n", paramName, paramName, comma)
+                    }
+                }
+                PropertyMappingType.CUSTOM_CONVERTED -> {
+                    val converter = ClassName.bestGuess(mapping.converterName!!)
+                    if (mapping.sourceNullable) {
+                        builder.add("  %N = this.%N?.let { %T(it) }%L\n",
+                            paramName, paramName, converter, comma)
+                    } else {
+                        builder.add("  %N = %T(this.%N)%L\n",
+                            paramName, converter, paramName, comma)
+                    }
+                }
             }
         }
 
@@ -321,6 +349,14 @@ class MapperGenerator(
             "Target class ${target.qualifiedName?.asString()} must have a primary constructor"
         )
 
+        // Get custom converters for this source->target mapping
+        val sourceQName = source.qualifiedName?.asString() ?: ""
+        val targetQName = target.qualifiedName?.asString() ?: ""
+        val customConvertersMap = converterRegistry.getConverters(sourceQName, targetQName)
+        val customConverters = customConvertersMap.map { (prop, conv) ->
+            prop to ConverterInfo(prop, conv)
+        }.toMap()
+
         val propertyMappings = mutableListOf<PropertyMapping>()
 
         for (param in targetConstructorParams) {
@@ -338,7 +374,7 @@ class MapperGenerator(
             val sourceType = sourceProp.type.resolve()
             val targetType = targetProp?.type?.resolve() ?: param.type.resolve()
 
-            val mappingResult = resolvePropertyMapping(paramName, sourceType, targetType)
+            val mappingResult = resolvePropertyMapping(paramName, sourceType, targetType, customConverters)
             if (mappingResult is PropertyMappingResult.Error) {
                 return MapperResult.Error(mappingResult.message)
             }
@@ -360,7 +396,8 @@ class MapperGenerator(
     private fun resolvePropertyMapping(
         propertyName: String,
         sourceType: KSType,
-        targetType: KSType
+        targetType: KSType,
+        customConverters: Map<String, ConverterInfo> = emptyMap()
     ): PropertyMappingResult {
         val sourceQName = sourceType.declaration.qualifiedName?.asString() ?: ""
         val targetQName = targetType.declaration.qualifiedName?.asString() ?: ""
@@ -375,6 +412,19 @@ class MapperGenerator(
             )
         }
 
+        // Check for custom converter first
+        val customConverter = customConverters[propertyName]
+        if (customConverter != null) {
+            return PropertyMappingResult.Success(
+                PropertyMapping(
+                    propertyName,
+                    PropertyMappingType.CUSTOM_CONVERTED,
+                    converterName = customConverter.converterQualifiedName,
+                    sourceNullable = sourceNullable
+                )
+            )
+        }
+
         // Check for collection types BEFORE same-type check to handle List<A> -> List<B>
         val collectionMapping = resolveCollectionMapping(propertyName, sourceType, targetType)
         if (collectionMapping != null) {
@@ -385,6 +435,31 @@ class MapperGenerator(
         if (sourceQName == targetQName) {
             return PropertyMappingResult.Success(
                 PropertyMapping(propertyName, PropertyMappingType.DIRECT)
+            )
+        }
+
+        // Check for automatic String -> Enum conversion
+        val targetDecl = targetType.declaration as? KSClassDeclaration
+        if (sourceQName == "kotlin.String" && targetDecl?.classKind == ClassKind.ENUM_CLASS) {
+            return PropertyMappingResult.Success(
+                PropertyMapping(
+                    propertyName,
+                    PropertyMappingType.STRING_TO_ENUM,
+                    enumClassName = targetQName,
+                    sourceNullable = sourceNullable
+                )
+            )
+        }
+
+        // Check for automatic Enum -> String conversion
+        val sourceDecl = sourceType.declaration as? KSClassDeclaration
+        if (sourceDecl?.classKind == ClassKind.ENUM_CLASS && targetQName == "kotlin.String") {
+            return PropertyMappingResult.Success(
+                PropertyMapping(
+                    propertyName,
+                    PropertyMappingType.ENUM_TO_STRING,
+                    sourceNullable = sourceNullable
+                )
             )
         }
 
@@ -726,6 +801,33 @@ class MapperGenerator(
                                 mapping.propertyName, mapping.propertyName, keyExpr, valueExpr, comma)
                         }
                     }
+                    PropertyMappingType.STRING_TO_ENUM -> {
+                        val enumClass = ClassName.bestGuess(mapping.enumClassName!!)
+                        if (mapping.sourceNullable) {
+                            add("%N = this.%N?.let { %T.valueOf(it) }%L\n",
+                                mapping.propertyName, mapping.propertyName, enumClass, comma)
+                        } else {
+                            add("%N = %T.valueOf(this.%N)%L\n",
+                                mapping.propertyName, enumClass, mapping.propertyName, comma)
+                        }
+                    }
+                    PropertyMappingType.ENUM_TO_STRING -> {
+                        if (mapping.sourceNullable) {
+                            add("%N = this.%N?.name%L\n", mapping.propertyName, mapping.propertyName, comma)
+                        } else {
+                            add("%N = this.%N.name%L\n", mapping.propertyName, mapping.propertyName, comma)
+                        }
+                    }
+                    PropertyMappingType.CUSTOM_CONVERTED -> {
+                        val converter = ClassName.bestGuess(mapping.converterName!!)
+                        if (mapping.sourceNullable) {
+                            add("%N = this.%N?.let { %T(it) }%L\n",
+                                mapping.propertyName, mapping.propertyName, converter, comma)
+                        } else {
+                            add("%N = %T(this.%N)%L\n",
+                                mapping.propertyName, converter, mapping.propertyName, comma)
+                        }
+                    }
                 }
             }
             unindent()
@@ -739,7 +841,9 @@ data class PropertyMapping(
     val type: PropertyMappingType,
     val mapperName: String? = null,
     val sourceNullable: Boolean = false,
-    val keyMapperName: String? = null
+    val keyMapperName: String? = null,
+    val enumClassName: String? = null,
+    val converterName: String? = null
 )
 
 enum class PropertyMappingType {
@@ -747,8 +851,16 @@ enum class PropertyMappingType {
     MAPPED,
     LIST_MAPPED,
     ARRAY_MAPPED,
-    MAP_MAPPED
+    MAP_MAPPED,
+    STRING_TO_ENUM,
+    ENUM_TO_STRING,
+    CUSTOM_CONVERTED
 }
+
+data class ConverterInfo(
+    val propertyName: String,
+    val converterQualifiedName: String
+)
 
 sealed class MapperResult {
     data class Success(val funSpec: FunSpec) : MapperResult()
